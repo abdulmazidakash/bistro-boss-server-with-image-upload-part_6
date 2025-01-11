@@ -27,7 +27,7 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    // await client.connect();
 
     // const userCollection = client.db("bistroDb").collection("users");
     // const menuCollection = client.db("bistroDb").collection("menu");
@@ -296,9 +296,47 @@ async function run() {
       })
     })
 
+
+
+    // using aggregate pipeline
+    app.get('/order-stats', verifyToken, verifyAdmin, async(req, res) =>{
+      const result = await paymentCollection.aggregate([
+        {
+          $unwind: '$menuItemIds'
+        },
+        {
+          $lookup: {
+            from: 'menu',
+            localField: 'menuItemIds',
+            foreignField: '_id',
+            as: 'menuItems',
+          },
+        },
+        {
+          $unwind: '$menuItems'
+        },
+        {
+          $group: {
+            _id: '$menuItems.category',
+            quantity: { $sum: 1 },
+            revenue: { $sum: '$menuItems.price'}
+          }
+        },
+        {
+          $project: {
+            _id: 0,
+            category: '$_id',
+            quantity: '$quantity',
+            revenue: '$revenue'
+          }
+        },
+      ]).toArray();
+      res.send(result);
+    })
+
     // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
-    console.log("Pinged your deployment. You successfully connected to MongoDB!");
+    // await client.db("admin").command({ ping: 1 });
+    // console.log("Pinged your deployment. You successfully connected to MongoDB!");
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();
@@ -327,3 +365,12 @@ app.listen(port, () => {
  * app.delete('/users/:id')
  * 
 */
+
+//order status
+/**
+ * Non-efficient way
+ * 
+ * 1. load all the payments
+ * 2. for every menuItemIds (which is an array), go find the item from menu collection
+ * 3. for every item in the menu collection that you found from a  payment entry (document)
+ */
