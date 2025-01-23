@@ -4,6 +4,15 @@ const cors = require('cors');
 const jwt = require('jsonwebtoken');
 require('dotenv').config()
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY)
+const formData = require('form-data');
+const Mailgun = require('mailgun.js');
+const mailgun = new Mailgun(formData);
+
+const mg = mailgun.client({
+  username: 'api',
+  key: 'MAIL_GUN_API_KEY',
+});
+
 const port = process.env.PORT || 5000;
 
 // middleware
@@ -148,6 +157,24 @@ async function run() {
       res.send(result);
     });
 
+    // app.patch('/menu/:id', async (req, res) => {
+    //   const item = req.body;
+    //   const id = req.params.id;
+    //   const filter = { _id: new ObjectId(id) }
+    //   const updatedDoc = {
+    //     $set: {
+    //       name: item.name,
+    //       category: item.category,
+    //       price: item.price,
+    //       recipe: item.recipe,
+    //       image: item.image
+    //     }
+    //   }
+
+    //   const result = await menuCollection.updateOne(filter, updatedDoc)
+    //   res.send(result);
+    // })
+
     app.patch('/menu/:id', async (req, res) => {
       const item = req.body;
       const id = req.params.id;
@@ -260,6 +287,30 @@ async function run() {
       };
 
       const deleteResult = await cartCollection.deleteMany(query);
+
+      //send user email about payment collection
+      mg.messages.create(process.env.MAIL_SENDING_DOMAIN, {
+        from: "Excited User <mailgun@YOUR-SANDBOX-DOMAIN>",
+        to: ["akashabdulmazid@gmail.com"],
+        subject: "Bistor boss order confirmation",
+        text: "Testing some Mailgun awesomness!",
+        html: `
+        <div>
+          <h2>
+          Thank you for your order
+          </h2>
+          <h4>
+            Your TransactionId: <strong>${payment.transactionId}</strong>
+          </h4>
+          <p>
+            we would like to get your feedback about the food
+          </p>
+        </div>
+        
+        `
+      })
+      .then(msg => console.log(msg)) // logs response data
+      .catch(err => console.error(err)); // logs any error
 
       res.send({ paymentResult, deleteResult });
     })
