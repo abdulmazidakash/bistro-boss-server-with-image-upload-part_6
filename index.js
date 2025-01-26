@@ -7,6 +7,7 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY)
 const formData = require('form-data');
 const Mailgun = require('mailgun.js');
 const mailgun = new Mailgun(formData);
+const axios = require("axios");
 
 const mg = mailgun.client({
   username: 'api',
@@ -18,6 +19,7 @@ const port = process.env.PORT || 5000;
 // middleware
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded());
 
 
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
@@ -383,7 +385,123 @@ async function run() {
         },
       ]).toArray();
       res.send(result);
+    });
+
+
+    //ssl-payment system
+    app.post("/create-ssl-payment", async (req, res) => {
+      const payment = req.body;
+
+      console.log('payment info', payment);
+
+      const trxid = new ObjectId().toString();
+
+      payment.transactionId = trxid;
+
+      //step 1: initialize the data
+      const initiate = {
+        store_id: "bistr679654082ac0e",
+        store_passwd: "bistr679654082ac0e@ssl",
+        total_amount: payment.price,
+        currency: "BDT",
+        tran_id: trxid,
+        success_url: "http://localhost:5000/success-payment",
+        fail_url: "http://localhost:5173/fail",
+        cancel_url: "http://localhost:5173/cancle",
+        ipn_url: "http://localhost:5000/ipn-success-payment",
+        cus_name: "Customer Name",
+        cus_email: `${payment.email}`,
+        cus_add1: "Dhaka&",
+        cus_add2: "Dhaka&",
+        cus_city: "Dhaka&",
+        cus_state: "Dhaka&",
+        cus_postcode: 1000,
+        cus_country: "Bangladesh",
+        cus_phone: "01711111111",
+        cus_fax: "01711111111",
+        shipping_method: "NO",
+        product_name: "Laptop",
+        product_category: "Laptop",
+        product_profile: "general",
+        multi_card_name: "mastercard,visacard,amexcard",
+        value_a: "ref001_A&",
+        value_b: "ref002_B&",
+        value_c: "ref003_C&",
+        value_d: "ref004_D",
+      };
+
+      //step 2: send the request to sslcommerz payment gateway
+      const iniResponse = await axios({
+        url: "https://sandbox.sslcommerz.com/gwprocess/v4/api.php",
+        method: "POST",
+        data: initiate,
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+      });
+
+      console.log(iniResponse, 'iniResponse');
+
+      const saveData = await paymentCollection.insertOne(payment);
+      //step-3 : get the url for payment
+      const gatewayUrl = iniResponse?.data?.GatewayPageURL;
+
+      console.log(gatewayUrl, "gatewayUrl");
+
+      //step-4: redirect the customer to the gateway
+      res.send({ gatewayUrl });
+    });
+
+    //success payment data
+    app.post('/success-payment', async(req, res)  =>{
+      const paymentSuccess = req.body;
+
+      console.log('payment success info', paymentSuccess);
+
+      //payment validation 
+
+      const {data} = await axios.get(`https://sandbox.sslcommerz.com/validator/api/validationserverAPI.php?val_id=${paymentSuccess.val_id}&store_id=bistr679654082ac0e&store_passwd=bistr679654082ac0e@ssl&format=json`);
+
+      console.log('isValidPayment', data);
+
+      if(data.status !== 'VALID'){
+        return res.send({message: 'Invalid payment'});
+      };
+
+      //update payment status in database
+      const updatePayment = await paymentCollection.updateOne(
+        { transactionId: data.tran_id},
+        {
+          $set: {
+            status: 'success',
+          },
+        }
+      );
+
+      const payment = await paymentCollection.findOne({
+        transactionId: data.tran_id,
+        
+      });
+      console.log('payment ------>', payment);
+      
+      //carefully delete each item from the cart
+      console.log('payment info --->', payment);
+      const query = {
+        _id: {
+          $in: payment.cartIds.map((id) => new ObjectId(id))
+        },
+      };
+
+      const deleteResult = await cartCollection.deleteMany(query);
+
+      console.log('delete result---->', deleteResult);
+
+      res.redirect('http://localhost:5173/success')
+      console.log('update payment ------>', updatePayment);
+
     })
+
+  
 
     // Send a ping to confirm a successful connection
     // await client.db("admin").command({ ping: 1 });
